@@ -1,0 +1,24 @@
+# Database interaction
+psycopg2-binary  # Or psycopg2, for PostgreSQL/TimescaleDB
+# Data fetching
+requests
+aiohttp # For asynchronous HTTP requests
+colorama # For colored terminal output
+curl_cffi
+# Real-time data (Binance WebSocket)
+websockets
+# For .env
+python-dotenv
+#  Other libraries (likely, may need to add or remove based on your codebase)
+pandas
+numpy
+#  And any other libraries you use in your implementation...
+fastapi
+uvicorn[standard]
+
+# ORM for easier DB handling (future use)
+SQLAlchemy==2.0.23  # Latest stable; optional version pin for safety
+
+# Background tasks (future use)
+celery==5.3.4       # Latest stable
+redis==5.0.1        # Broker for Celery (simple in-memory queue)

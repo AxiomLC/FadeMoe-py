@@ -1,0 +1,28 @@
+# Environment variables
+# Never commit .env files - they contain secrets!
+.env
+
+# Python
+# Ignore the virtual environment folder
+.venv/
+# Ignore Python bytecode and cache files
+__pycache__/
+*.pyc
+
+# VSCode IDE folder
+.vscode/
+
+# Old code and reviews
+# Ignore the old JavaScript project folders
+FadeMoe4_review/
+old/
+
+# Project-specific files
+# Ignore the Voidrules file
+.voidrules
+# Ignore local database configuration (if it's not meant to be shared)
+postgresql.conf
+
+# Test files
+# Ignore any file that starts with "test"
+test*

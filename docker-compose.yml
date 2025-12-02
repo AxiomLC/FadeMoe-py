@@ -1,0 +1,49 @@
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - fademoe5_db_data:/var/lib/postgresql/data
+      - ./postgresql.conf:/var/lib/postgresql/data/postgresql.conf
+    networks:
+      - fademoe-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db # This is the service name for the database container
+      DB_PORT: 5432 # The internal port for the database
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      # BINANCE_API_KEY: ${BINANCE_API_KEY}
+      # BINANCE_API_SECRET: ${BINANCE_API_SECRET}
+      PYTHONPATH: /app
+    ports:
+      - "8000:8000"
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - .:/app
+    networks:
+      - fademoe-network
+
+volumes:
+  fademoe5_db_data:
+    name: fademoe5_db_data
+
+networks:
+  fademoe-network:
+    driver: bridge
