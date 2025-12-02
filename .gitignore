@@ -26,3 +26,5 @@ postgresql.conf
 # Test files
 # Ignore any file that starts with "test"
 test*
+postgresql_conf_old.
+apis/archive

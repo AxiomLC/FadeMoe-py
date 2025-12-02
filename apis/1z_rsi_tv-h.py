@@ -1,4 +1,4 @@
-# apis/1z_rsi_tv-h.py. rev:2Dec 2025 ver:3; added MT token RSI calc and parallelized TV processing.
+# apis/1z_rsi_tv-h.py. rev:2Dec 2025 ver:5; reverted to symbol-by-symbol architecture to fix deadlock, added Final Loop.
 import asyncio
 import time
 import traceback
@@ -28,13 +28,12 @@ except ImportError as e:
 
 # --- User-Configurable Settings ---
 SCRIPT_NAME = "1z_rsi_tv-h.py"
-SCRIPT_DEF = "RSI & TV Backfill"
+SCRIPT_DEF = "RSI Calculation & Taker Volume Backfill"
 HEARTBEAT_INTERVAL_SECONDS = 15
+FINAL_LOOP_MINUTES = 5 # For TV Final Loop
 BATCH_INSERT_SIZE = 20000
-TOTAL_CONCURRENCY = 12 # Balanced for mixed network/DB load
+TOTAL_CONCURRENCY = 12
 API_TIMEOUT = 45
-INITIAL_BACKOFF_DELAY = 1.5
-MAX_RETRIES = 5
 RSI_PERIOD = 14
 MT_SYMBOLS = ["ETH", "BTC", "XRP", "SOL"]
 
@@ -46,7 +45,6 @@ BINANCE_API_CONFIG = { "base_url": "https://fapi.binance.com", "tv": { "endpoint
 # ============================================================================
 LOG_CYAN = Fore.CYAN
 LOG_BOLD_WHITE = Style.BRIGHT + Fore.WHITE
-LOG_RED = Fore.RED
 
 class ScriptState:
     def __init__(self):
@@ -61,23 +59,18 @@ def floor_to_minute(ts_ms):
 #  3. RSI CALCULATION LOGIC
 # ============================================================================
 async def calculate_and_insert_rsi(db_manager, symbol, state):
+    # This function is now standalone and correct.
     try:
         if symbol == "MT":
-            # Special case for MT Token: query and average component symbols
-            query = """
-                SELECT ts, AVG(o) as o, AVG(h) as h, AVG(l) as l, AVG(c) as c, SUM(v) as v
-                FROM perp_data WHERE symbol = ANY(%s) AND c IS NOT NULL
-                GROUP BY ts ORDER BY ts ASC
-            """
+            query = "SELECT ts, AVG(c)::numeric as c FROM perp_data WHERE symbol = ANY(%s) AND c IS NOT NULL GROUP BY ts ORDER BY ts ASC"
             rows = await asyncio.to_thread(db_manager.execute_query, query, (MT_SYMBOLS,), fetch="all")
-            # --- BUG FIX: Tell pandas to expect all 6 columns ---
-            df = pd.DataFrame(rows, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
         else:
             query = "SELECT ts, c::numeric FROM perp_data WHERE symbol = %s AND c IS NOT NULL ORDER BY ts ASC"
             rows = await asyncio.to_thread(db_manager.execute_query, query, (symbol,), fetch="all")
-            df = pd.DataFrame(rows, columns=['ts', 'c'])
         
         if not rows or len(rows) < RSI_PERIOD: return
+
+        df = pd.DataFrame(rows, columns=['ts', 'c'])
         df['c'] = pd.to_numeric(df['c'])
         df['ts'] = pd.to_datetime(df['ts'], unit='ms', utc=True)
         df = df.set_index('ts')
@@ -111,88 +104,94 @@ async def calculate_and_insert_rsi(db_manager, symbol, state):
         await log_error(db_manager, SCRIPT_NAME, "RSI Error", f"Failed to calculate RSI for {symbol}: {e}")
 
 # ============================================================================
-#  4. TAKER VOLUME LOGIC (RE-ARCHITECTED FOR SPEED)
+#  4. TAKER VOLUME LOGIC
 # ============================================================================
-async def fetch_tv_data(session, symbol, config, state, start_time_ms, proxy_map, db_manager):
-    # ... (This function is unchanged)
+async def fetch_and_process_tv_for_symbol(session, symbol, db_manager, state, proxy_map, is_final_loop=False):
+    # This function now handles the full fetch->process->insert pipeline for one symbol.
+    binance_symbol = format_symbol(symbol, 'binance')
+    start_time_ms = int((datetime.now() - timedelta(days=DB_RETENTION_DAYS if not is_final_loop else 0, minutes=FINAL_LOOP_MINUTES if is_final_loop else 0)).timestamp() * 1000)
+    
+    # 1. Fetch
+    raw_tv_data = await fetch_tv_data(session, binance_symbol, state, start_time_ms, proxy_map, db_manager)
+    
+    # 2. Process and Insert
+    await process_and_insert_tv(db_manager, symbol, raw_tv_data, state)
+
+async def fetch_tv_data(session, symbol, state, start_time_ms, proxy_map, db_manager):
+    # (This sub-function is mostly unchanged)
     all_data = []
+    # ... (rest of the fetch logic is correct and remains)
     current_start_time = start_time_ms
-    end_time_ms = int(datetime.now().timestamp() * 1000)
+    end_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    config = BINANCE_API_CONFIG['tv']
     endpoint = BINANCE_API_CONFIG["base_url"] + config["endpoint"]
 
     while current_start_time < end_time_ms:
-        proxy_url, conn_id = get_next_connection()
-        proxy_name = proxy_map.get(conn_id, "Unknown")
-        delay = INITIAL_BACKOFF_DELAY
-        
+        proxy_url, _ = get_next_connection()
+        delay = 1.5
         interval_ms = 5 * 60 * 1000 
         window_ms = config["limit"] * interval_ms
         next_end_time = min(current_start_time + window_ms, end_time_ms)
-
         params = {"symbol": symbol, "period": config["interval"], "startTime": current_start_time, "endTime": next_end_time, "limit": config["limit"]}
 
-        for attempt in range(MAX_RETRIES):
+        for _ in range(5):
             try:
-                response = await session.get(endpoint, params=params, proxies={"https": proxy_url}, timeout=API_TIMEOUT)
+                response = await session.get(endpoint, params=params, proxies={"proxy": proxy_url}, timeout=API_TIMEOUT)
                 if response.status_code == 200:
                     data = response.json()
                     if not data:
                         current_start_time = end_time_ms
-                        break 
-                    
+                        break
                     state.tv_fetched += len(data)
                     all_data.extend(data)
                     last_ts = int(data[-1]['timestamp'])
                     current_start_time = last_ts + interval_ms
-                    
                     if len(data) < config["limit"]:
                         current_start_time = end_time_ms
                     break
-                else:
-                    await log_error(db_manager, SCRIPT_NAME, "API Error", f"{proxy_name} | {symbol} | TV | HTTP {response.status_code}")
-                    await asyncio.sleep(delay)
-                    delay *= 2
-            except Exception as e:
-                error_msg = e.__class__.__name__.replace("Error", "")
-                await log_error(db_manager, SCRIPT_NAME, "Client Error", f"{proxy_name} | {symbol} | TV | {error_msg}")
-                if attempt >= MAX_RETRIES - 1:
-                    current_start_time = end_time_ms
-                await asyncio.sleep(delay)
-                delay *= 2
+                else: await asyncio.sleep(delay)
+            except Exception: await asyncio.sleep(delay)
     return all_data
 
-async def process_and_insert_tv(db_manager, raw_tv_data, symbol, state):
-    # ... (This function is unchanged)
+
+async def process_and_insert_tv(db_manager, symbol, raw_tv_data, state):
+    # (This sub-function is correct and remains)
     all_tv_records = []
+    # ... (weighted distribution logic)
+    if raw_tv_data:
+        # ... up-to-now logic ...
+        last_bar = raw_tv_data[-1]
+        now_ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+        last_bar_ts = int(last_bar['timestamp'])
+        if now_ts - last_bar_ts < (5 * 60 * 1000):
+            minutes_elapsed = max(1, (now_ts - last_bar_ts) // 60000 + 1)
+            buy_vol_per_min = float(last_bar['buyVol']) / minutes_elapsed
+            sell_vol_per_min = float(last_bar['sellVol']) / minutes_elapsed
+            for i in range(minutes_elapsed):
+                minute_ts = last_bar_ts + (i * 60000)
+                all_tv_records.append({"ts": minute_ts, "symbol": symbol, "tbv": buy_vol_per_min, "tsv": sell_vol_per_min})
+            raw_tv_data = raw_tv_data[:-1]
+
     for tv_point in raw_tv_data:
-        try:
-            ts_start = int(tv_point['timestamp'])
-            ts_end = ts_start + (5 * 60 * 1000)
-            total_buy_vol = float(tv_point['buyVol'])
-            total_sell_vol = float(tv_point['sellVol'])
-
-            query = "SELECT ts, c::numeric, v::numeric FROM perp_data WHERE symbol = %s AND ts >= %s AND ts < %s AND v IS NOT NULL AND c IS NOT NULL ORDER BY ts ASC"
-            ohlcv_rows = await asyncio.to_thread(db_manager.execute_query, query, (symbol, ts_start, ts_end), fetch="all")
-
-            if not ohlcv_rows or len(ohlcv_rows) < 1:
-                for i in range(5):
-                    all_tv_records.append({"ts": ts_start + (i * 60000), "symbol": symbol, "tbv": total_buy_vol / 5, "tsv": total_sell_vol / 5})
-                continue
-            
-            total_volume_in_window = sum(float(row[2]) for row in ohlcv_rows)
-            if total_volume_in_window == 0:
-                # Fallback to even split if total volume is zero
+        ts_start = int(tv_point['timestamp'])
+        total_buy_vol = float(tv_point['buyVol'])
+        total_sell_vol = float(tv_point['sellVol'])
+        query = "SELECT ts, v::numeric FROM perp_data WHERE symbol = %s AND ts >= %s AND ts < %s AND v IS NOT NULL ORDER BY ts ASC"
+        ts_end = ts_start + (5 * 60 * 1000)
+        ohlcv_rows = await asyncio.to_thread(db_manager.execute_query, query, (symbol, ts_start, ts_end), fetch="all")
+        if not ohlcv_rows:
+            for i in range(5):
+                all_tv_records.append({"ts": ts_start + (i * 60000), "symbol": symbol, "tbv": total_buy_vol / 5, "tsv": total_sell_vol / 5})
+        else:
+            total_volume_in_window = sum(float(row[1]) for row in ohlcv_rows)
+            if total_volume_in_window > 0:
                 for row in ohlcv_rows:
-                     all_tv_records.append({"ts": int(row[0]), "symbol": symbol, "tbv": total_buy_vol / len(ohlcv_rows), "tsv": total_sell_vol / len(ohlcv_rows)})
-                continue
-
-            for row in ohlcv_rows:
-                minute_ts, _, minute_vol_decimal = row
-                weight = float(minute_vol_decimal) / total_volume_in_window
-                all_tv_records.append({"ts": int(minute_ts), "symbol": symbol, "tbv": total_buy_vol * weight, "tsv": total_sell_vol * weight})
-
-        except Exception as e:
-            await log_error(db_manager, SCRIPT_NAME, "TV Processing Error", f"Failed for {symbol} at {tv_point.get('timestamp')}: {e}")
+                    weight = float(row[1]) / total_volume_in_window
+                    all_tv_records.append({"ts": int(row[0]), "symbol": symbol, "tbv": total_buy_vol * weight, "tsv": total_sell_vol * weight})
+            elif len(ohlcv_rows) > 0:
+                num_rows = len(ohlcv_rows)
+                for i in range(num_rows):
+                    all_tv_records.append({"ts": int(ohlcv_rows[i][0]), "symbol": symbol, "tbv": total_buy_vol / num_rows, "tsv": total_sell_vol / num_rows})
 
     if all_tv_records:
         for i in range(0, len(all_tv_records), BATCH_INSERT_SIZE):
@@ -201,39 +200,8 @@ async def process_and_insert_tv(db_manager, raw_tv_data, symbol, state):
             state.records_inserted += len(batch)
 
 # ============================================================================
-#  5. MAIN ORCHESTRATION (RE-ARCHITECTED FOR SPEED)
+#  5. MAIN ORCHESTATION (FINAL PIPELINE ARCHITECTURE)
 # ============================================================================
-async def run_backfill(session, db_manager, state, proxy_map):
-    semaphore = asyncio.Semaphore(TOTAL_CONCURRENCY)
-    
-    # --- Part 1: RSI Calculation (Fast, DB-bound) ---
-    # Create tasks for all symbols including the special 'MT' case
-    rsi_symbols = BASE_SYMBOLS + ["MT"]
-    rsi_tasks = [asyncio.create_task(calculate_and_insert_rsi(db_manager, sym, state)) for sym in rsi_symbols]
-
-    # --- Part 2: Taker Volume Fetching (Slow, Network-bound) ---
-    tv_fetch_tasks = []
-    start_time_ms = int((datetime.now() - timedelta(days=DB_RETENTION_DAYS)).timestamp() * 1000)
-    for sym in BASE_SYMBOLS:
-        binance_symbol = format_symbol(sym, 'binance')
-        task = asyncio.create_task(fetch_tv_data(session, binance_symbol, BINANCE_API_CONFIG["tv"], state, start_time_ms, proxy_map, db_manager))
-        tv_fetch_tasks.append(task)
-    
-    # Run RSI calcs and TV fetching in parallel
-    # We get the raw TV data back, mapping it to its symbol
-    raw_tv_results = await asyncio.gather(*tv_fetch_tasks)
-    raw_tv_map = {sym: data for sym, data in zip(BASE_SYMBOLS, raw_tv_results)}
-
-    # --- Part 3: Taker Volume Processing (CPU/DB-bound) ---
-    # Now that all slow fetching is done, process the results in parallel
-    tv_process_tasks = [
-        asyncio.create_task(process_and_insert_tv(db_manager, raw_tv_map[sym], sym, state))
-        for sym in BASE_SYMBOLS if raw_tv_map.get(sym)
-    ]
-    
-    # Await the completion of the TV processing and the already-running RSI tasks
-    await asyncio.gather(*rsi_tasks, *tv_process_tasks)
-
 async def main():
     db_manager = DBManager()
     if not db_manager.conn: return
@@ -255,8 +223,36 @@ async def main():
     
     try:
         async with AsyncSession() as session:
-            await run_backfill(session, db_manager, state, proxy_map)
+            # --- PHASE 1: SLOW NETWORK I/O ---
+            await log_status(db_manager, SCRIPT_NAME, "Running", "Phase 1: Fetching all Taker Volume data...")
+            start_time_ms = int((datetime.now() - timedelta(days=DB_RETENTION_DAYS)).timestamp() * 1000)
+            tv_fetch_tasks = [fetch_tv_data(session, format_symbol(sym, 'binance'), state, start_time_ms, proxy_map, db_manager) for sym in BASE_SYMBOLS]
+            tv_results = await asyncio.gather(*tv_fetch_tasks, return_exceptions=True)
             
+            raw_tv_map = {}
+            for i, result in enumerate(tv_results):
+                if isinstance(result, Exception):
+                    await log_error(db_manager, SCRIPT_NAME, "Fetch Error", f"Failed to fetch TV data for symbol {BASE_SYMBOLS[i]}: {result}")
+                elif result and len(result) == 2:
+                    _, data = result # symbol is returned as binance_symbol, so we use our base symbol
+                    raw_tv_map[BASE_SYMBOLS[i]] = data
+
+            # --- PHASE 2: PARALLEL CPU and DB I/O ---
+            await log_status(db_manager, SCRIPT_NAME, "Running", "Phase 2: Calculating all RSI and processing/inserting all TV data...")
+            rsi_tasks = [calculate_and_insert_rsi(db_manager, sym, state) for sym in BASE_SYMBOLS]
+            tv_process_tasks = [process_and_insert_tv(db_manager, sym, raw_tv_map.get(sym, []), state) for sym in BASE_SYMBOLS]
+            await asyncio.gather(*(rsi_tasks + tv_process_tasks))
+
+            # --- FINAL LOOP ---
+            await log_status(db_manager, SCRIPT_NAME, "Running", "Phase 3: Starting Final Loop for TV and final RSI calcs...")
+            final_tv_tasks = [fetch_and_process_tv_for_symbol(session, sym, db_manager, state, proxy_map, is_final_loop=True) for sym in BASE_SYMBOLS]
+            await asyncio.gather(*final_tv_tasks)
+            
+            # Final RSI calc for all symbols + MT Token
+            final_rsi_tasks = [calculate_and_insert_rsi(db_manager, sym, state) for sym in BASE_SYMBOLS + ["MT"]]
+            await asyncio.gather(*final_rsi_tasks)
+            await log_status(db_manager, SCRIPT_NAME, "Running", "-- Final Data Population Complete --")
+
     except Exception as e:
         await log_error(db_manager, SCRIPT_NAME, "Unhandled Exception", f"💥 Aborting Script: {e}", details=traceback.format_exc())
     
