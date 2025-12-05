@@ -207,30 +207,46 @@ class DBManager:
         # Table: perp_status
         perp_status_query = """
         CREATE TABLE IF NOT EXISTS perp_status (
-          task_id SERIAL PRIMARY KEY,
+          ts TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          task_id SERIAL,
           script_name TEXT NOT NULL,
           status TEXT NOT NULL,
           message TEXT,
           details JSONB,
-          ts TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          PRIMARY KEY (ts, task_id, script_name)
         );
         """
         self.execute_query(perp_status_query)
         print("    - Created table: perp_status")
 
+        # Create index for descending order on ts
+        perp_status_index_query = """
+        CREATE INDEX IF NOT EXISTS idx_perp_status_ts ON perp_status (ts DESC);
+        """
+        self.execute_query(perp_status_index_query)
+        print("    - Created index for descending order on ts in perp_status")
+
         # Table: perp_errors
         perp_errors_query = """
         CREATE TABLE IF NOT EXISTS perp_errors (
-          error_id SERIAL PRIMARY KEY,
-          script_name TEXT,
+          ts TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          error_id SERIAL,
+          script_name TEXT NOT NULL,
           error_type TEXT,
           error_message TEXT,
           details JSONB,
-          ts TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          PRIMARY KEY (ts, error_id, script_name)
         );
         """
         self.execute_query(perp_errors_query)
         print("    - Created table: perp_errors")
+
+        # Create index for descending order on ts
+        perp_errors_index_query = """
+        CREATE INDEX IF NOT EXISTS idx_perp_errors_ts ON perp_errors (ts DESC);
+        """
+        self.execute_query(perp_errors_index_query)
+        print("    - Created index for descending order on ts in perp_errors")
 
         # Placeholder Table: combo_algos
         combo_algos_query = """

@@ -26,7 +26,7 @@ except ImportError as e:
 
 # --- User-Configurable Settings ---
 SCRIPT_NAME = "1z_lq_h.py"
-SCRIPT_DEF = "Liquidations Backfill (Coinalyze)"
+SCRIPT_DEF = "LQ Backfill (Coinalyze)"
 HEARTBEAT_INTERVAL_SECONDS = 15
 BATCH_INSERT_SIZE = 20000
 TOTAL_CONCURRENCY = 10 # Coinalyze may have stricter rate limits

@@ -1,9 +1,8 @@
-# back/api_utils.py. rev:1Dec 2025 ver:2; wrapped log_status and log_error in async.to_thread.
-
+# back/api_utils.py. rev:4Dec 2025 ver:3;
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from colorama import Fore, Style, init
 from psycopg2 import sql
@@ -58,7 +57,7 @@ async def log_status(db_manager, script_name, status, message, details=None, pro
         logger.warning("DBManager not available. Skipping database log for status.")
         return
 
-    query = sql.SQL("INSERT INTO perp_status (script_name, status, message, details) VALUES (%s, %s, %s, %s)")
+    query = sql.SQL("INSERT INTO perp_status (ts, task_id, script_name, status, message, details) VALUES (DEFAULT, DEFAULT, %s, %s, %s, %s)")
     details_json = json.dumps(details) if details is not None else None
     
     try:
@@ -77,7 +76,7 @@ async def log_error(db_manager, script_name, error_type, message, details=None):
         logger.warning("DBManager not available. Skipping database log for error.")
         return
 
-    query = sql.SQL("INSERT INTO perp_errors (script_name, error_type, error_message, details) VALUES (%s, %s, %s, %s)")
+    query = sql.SQL("INSERT INTO perp_errors (ts, error_id, script_name, error_type, error_message, details) VALUES (DEFAULT, DEFAULT, %s, %s, %s, %s)")
     details_json = json.dumps(details) if details is not None else None
     
     try:
@@ -119,5 +118,7 @@ def format_symbol(base_symbol, exchange):
     """
     if exchange == 'binance':
         return f"{base_symbol}USDT"
+    elif exchange == 'bybit':
+        return f"{base_symbol}USDT"
     else:
-        raise ValueError(f"Unsupported exchange for symbol formatting: {exchange}")
+        return base_symbol

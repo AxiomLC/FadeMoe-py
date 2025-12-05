@@ -27,7 +27,7 @@ except ImportError as e:
 
 # --- User-Configurable Settings ---
 SCRIPT_NAME = "1ohlcv_pfr_h.py" # SCRIPT_NAME is for DB logging
-SCRIPT_DEF = "OHLCV/PFR Backfill"
+SCRIPT_DEF = "OHLCV & PFR Backfill"
 HEARTBEAT_INTERVAL_SECONDS = 15
 FINAL_LOOP_MINUTES = 5
 BATCH_INSERT_SIZE = 20000

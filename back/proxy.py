@@ -16,7 +16,7 @@ import logging
 # ============================================================================
 # To disable a proxy, simply comment out its line in the list below.
 _all_proxies = [
-    os.getenv("PROXY_URL_1"),  # Main Webshare Proxy
+    # os.getenv("PROXY_URL_1"),  # Main Webshare Proxy
     os.getenv("PROXY_URL_2"),  # Secondary IPRoyal - DISABLED due to connection errors
     os.getenv("PROXY_URL_3"),  # Tertiary Privado - DISABLED due to connection errors
 ]

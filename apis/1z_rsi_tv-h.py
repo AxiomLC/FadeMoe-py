@@ -28,7 +28,7 @@ except ImportError as e:
 
 # --- User-Configurable Settings ---
 SCRIPT_NAME = "1z_rsi_tv-h.py"
-SCRIPT_DEF = "RSI Calculation & Taker Volume Backfill"
+SCRIPT_DEF = "RSI & TV Backfill"
 HEARTBEAT_INTERVAL_SECONDS = 15
 FINAL_LOOP_MINUTES = 5 # For TV Final Loop
 BATCH_INSERT_SIZE = 20000

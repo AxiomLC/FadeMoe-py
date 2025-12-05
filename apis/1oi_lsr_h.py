@@ -27,7 +27,7 @@ except ImportError as e:
 
 # --- User-Configurable Settings ---
 SCRIPT_NAME = "1oi_lsr_h.py"
-SCRIPT_DEF = "OI/LSR Backfill"
+SCRIPT_DEF = "OI & LSR Backfill"
 HEARTBEAT_INTERVAL_SECONDS = 15
 BATCH_INSERT_SIZE = 20000
 TOTAL_CONCURRENCY = 15
