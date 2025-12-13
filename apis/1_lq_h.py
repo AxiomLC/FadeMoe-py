@@ -1,4 +1,4 @@
-# apis/1z_lq_h.py. rev:2Dec 2025 ver:1; initial creation from js file for Coinalyze liquidations.
+# apis/1_lq_h.py. rev:2Dec 2025 ver:1; initial creation from js file for Coinalyze liquidations.
 import asyncio
 import time
 import traceback
@@ -25,7 +25,7 @@ except ImportError as e:
     exit(1)
 
 # --- User-Configurable Settings ---
-SCRIPT_NAME = "1z_lq_h.py"
+SCRIPT_NAME = "1_lq_h.py"
 SCRIPT_DEF = "LQ Backfill (Coinalyze)"
 HEARTBEAT_INTERVAL_SECONDS = 15
 BATCH_INSERT_SIZE = 20000
@@ -157,7 +157,7 @@ async def main():
     async def heartbeat():
         while True:
             await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
-            print(LOG_CYAN + f"{SCRIPT_DEF} | Fetched: ~{state.records_fetched:,} | Inserted: ~{state.records_inserted:,}")
+            print(LOG_CYAN + f"🚥 {SCRIPT_DEF} | Fetched: ~{state.records_fetched:,} | Inserted: ~{state.records_inserted:,}")
 
     heartbeat_task = asyncio.create_task(heartbeat())
     
@@ -171,7 +171,7 @@ async def main():
         heartbeat_task.cancel()
         duration = time.time() - script_start_time
         
-        completion_message = f"✅ {SCRIPT_DEF} Finished - Inserted {state.records_inserted:,} records in {duration:.2f}s."
+        completion_message = f"⏱️ {SCRIPT_DEF} Complete - Inserted {state.records_inserted:,} records in {duration:.2f}s."
         await log_status(db_manager, SCRIPT_NAME, "Completed", completion_message, details={"duration": f"{duration:.2f}s"})
         
         db_manager.close_connection()

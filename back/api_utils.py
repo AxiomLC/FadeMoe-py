@@ -61,7 +61,7 @@ async def log_status(db_manager, script_name, status, message, details=None, pro
     details_json = json.dumps(details) if details is not None else None
     
     try:
-        await asyncio.to_thread(db_manager.execute_query, query, (script_name, status, message, details_json))
+        await db_manager.execute_query(query, (script_name, status, message, details_json))
     except Exception as e:
         logger.error(Fore.RED + f"[DB LOG ERROR] Failed to write status to database: {e}")
 
@@ -80,7 +80,7 @@ async def log_error(db_manager, script_name, error_type, message, details=None):
     details_json = json.dumps(details) if details is not None else None
     
     try:
-        await asyncio.to_thread(db_manager.execute_query, query, (script_name, error_type, message, details_json))
+        await db_manager.execute_query(query, (script_name, error_type, message, details_json))
     except Exception as e:
         logger.error(Fore.RED + f"[DB LOG ERROR] Failed to write error to database: {e}")
 

@@ -16,7 +16,7 @@ import logging
 # ============================================================================
 # To disable a proxy, simply comment out its line in the list below.
 _all_proxies = [
-    # os.getenv("PROXY_URL_1"),  # Main Webshare Proxy
+    os.getenv("PROXY_URL_1"),  # Main Webshare Proxy
     os.getenv("PROXY_URL_2"),  # Secondary IPRoyal - DISABLED due to connection errors
     os.getenv("PROXY_URL_3"),  # Tertiary Privado - DISABLED due to connection errors
 ]
@@ -26,7 +26,7 @@ _all_proxies = [
 # ============================================================================
 # The ratio of requests that should be sent through the proxy pool.
 # 0.0 means never use proxies; 1.0 means always use proxies (if available).
-USE_PROXY_RATIO = 0.7
+USE_PROXY_RATIO = 0.7 # 0.7
 
 # ============================================================================
 #  INITIALIZATION (DO NOT EDIT)

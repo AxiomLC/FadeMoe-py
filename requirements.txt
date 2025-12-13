@@ -1,5 +1,5 @@
 # Database interaction
-psycopg2-binary  # Or psycopg2, for PostgreSQL/TimescaleDB
+psycopg2-binary==2.9.9 # Or psycopg2, for PostgreSQL/TimescaleDB
 # Data fetching
 requests
 aiohttp # For asynchronous HTTP requests
@@ -22,3 +22,4 @@ SQLAlchemy==2.0.23  # Latest stable; optional version pin for safety
 # Background tasks (future use)
 celery==5.3.4       # Latest stable
 redis==5.0.1        # Broker for Celery (simple in-memory queue)
+tqdm
